@@ -7,14 +7,17 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	log "github.com/sirupsen/logrus"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/tools/reference"
 
 	"github.com/linki/chaoskube/util"
@@ -72,6 +75,19 @@ var (
 // * whether to enable/disable dry-run mode
 // * whether to enable/disable event creation
 func New(client kubernetes.Interface, labels, annotations, namespaces labels.Selector, excludedWeekdays []time.Weekday, excludedTimesOfDay []util.TimePeriod, excludedDaysOfYear []time.Time, timezone *time.Location, minimumAge time.Duration, logger log.FieldLogger, dryRun bool, createEvent bool) *Chaoskube {
+
+	bc := record.NewBroadcaster()
+	_ = bc.StartLogging(func(format string, args ...interface{}) {
+		spew.Dump(format)
+		spew.Dump(args)
+	})
+	rec := bc.NewRecorder(runtime.NewScheme(), v1.EventSource{})
+
+	pod := util.NewPod("bar", "foo", "Running")
+	rec.Event(&pod, v1.EventTypeNormal, "Foo", "foo")
+
+	// https://github.com/zalando-incubator/stackset-controller/pull/55/files#diff-f83c592fbf4ba31ccf8d7dba9feee3f8
+
 	return &Chaoskube{
 		Client:             client,
 		Labels:             labels,
