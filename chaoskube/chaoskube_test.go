@@ -13,6 +13,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
 
 	"github.com/linki/chaoskube/util"
 
@@ -45,6 +47,8 @@ func (suite *Suite) TestNew() {
 		minimumAge         = time.Duration(42)
 	)
 
+	recorder := record.NewBroadcasterForTests(0 * time.Second)
+
 	chaoskube := New(
 		client,
 		labelSelector,
@@ -58,6 +62,7 @@ func (suite *Suite) TestNew() {
 		logger,
 		false,
 		true,
+		recorder.NewRecorder(scheme.Scheme, v1.EventSource{Component: "controlplane"}),
 	)
 	suite.Require().NotNil(chaoskube)
 
@@ -584,6 +589,8 @@ func (suite *Suite) setupWithPods(labelSelector labels.Selector, annotations lab
 func (suite *Suite) setup(labelSelector labels.Selector, annotations labels.Selector, namespaces labels.Selector, excludedWeekdays []time.Weekday, excludedTimesOfDay []util.TimePeriod, excludedDaysOfYear []time.Time, timezone *time.Location, minimumAge time.Duration, dryRun bool, createEvent bool) *Chaoskube {
 	logOutput.Reset()
 
+	recorder := record.NewBroadcasterForTests(0 * time.Second)
+
 	return New(
 		fake.NewSimpleClientset(),
 		labelSelector,
@@ -597,6 +604,7 @@ func (suite *Suite) setup(labelSelector labels.Selector, annotations labels.Sele
 		logger,
 		dryRun,
 		createEvent,
+		recorder.NewRecorder(scheme.Scheme, v1.EventSource{Component: "controlplane"}),
 	)
 }
 

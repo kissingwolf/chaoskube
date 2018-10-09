@@ -7,16 +7,17 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
+	"github.com/golang/glog"
 	log "github.com/sirupsen/logrus"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/tools/reference"
 
@@ -51,6 +52,8 @@ type Chaoskube struct {
 	CreateEvent bool
 	// a function to retrieve the current time
 	Now func() time.Time
+
+	recorder record.EventRecorder
 }
 
 var (
@@ -74,19 +77,14 @@ var (
 // * a logger implementing logrus.FieldLogger to send log output to
 // * whether to enable/disable dry-run mode
 // * whether to enable/disable event creation
-func New(client kubernetes.Interface, labels, annotations, namespaces labels.Selector, excludedWeekdays []time.Weekday, excludedTimesOfDay []util.TimePeriod, excludedDaysOfYear []time.Time, timezone *time.Location, minimumAge time.Duration, logger log.FieldLogger, dryRun bool, createEvent bool) *Chaoskube {
-
-	bc := record.NewBroadcaster()
-	_ = bc.StartLogging(func(format string, args ...interface{}) {
-		spew.Dump(format)
-		spew.Dump(args)
-	})
-	rec := bc.NewRecorder(runtime.NewScheme(), v1.EventSource{})
-
-	pod := util.NewPod("bar", "foo", "Running")
-	rec.Event(&pod, v1.EventTypeNormal, "Foo", "foo")
+func New(client kubernetes.Interface, labels, annotations, namespaces labels.Selector, excludedWeekdays []time.Weekday, excludedTimesOfDay []util.TimePeriod, excludedDaysOfYear []time.Time, timezone *time.Location, minimumAge time.Duration, logger log.FieldLogger, dryRun bool, createEvent bool, _ record.EventRecorder) *Chaoskube {
 
 	// https://github.com/zalando-incubator/stackset-controller/pull/55/files#diff-f83c592fbf4ba31ccf8d7dba9feee3f8
+
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartLogging(glog.Infof)
+	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: client.CoreV1().Events("")})
+	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "chaoskube"})
 
 	return &Chaoskube{
 		Client:             client,
@@ -102,6 +100,7 @@ func New(client kubernetes.Interface, labels, annotations, namespaces labels.Sel
 		DryRun:             dryRun,
 		CreateEvent:        createEvent,
 		Now:                time.Now,
+		recorder:           recorder,
 	}
 }
 
@@ -217,6 +216,15 @@ func (c *Chaoskube) DeletePod(victim v1.Pod) error {
 	if err != nil {
 		return err
 	}
+
+	ref, err := reference.GetReference(scheme.Scheme, &victim)
+	if err != nil {
+		log.Fatalf("Could not get reference for pod %v: %v\n",
+			victim.Name, err)
+	}
+	c.recorder.Event(ref, v1.EventTypeNormal, "foo", "bar")
+
+	c.recorder.Event(ref, v1.EventTypeWarning, "foo", "bar")
 
 	err = c.CreateDeleteEvent(victim)
 	if err != nil {

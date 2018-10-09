@@ -10,14 +10,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/record"
 
 	"github.com/linki/chaoskube/chaoskube"
 	"github.com/linki/chaoskube/util"
@@ -152,6 +157,28 @@ func main() {
 		"offset":   offset / int(time.Hour/time.Second),
 	}).Info("setting timezone")
 
+	// bc := record.NewBroadcaster()
+	// _ = bc.StartLogging(func(format string, args ...interface{}) {
+	// 	spew.Dump(format)
+	// 	spew.Dump(args)
+	// })
+	// rec := bc.NewRecorder(runtime.NewScheme(), v1.EventSource{})
+	//
+	// pod := util.NewPod("bar", "foo", "Running")
+	// rec.Event(&pod, v1.EventTypeNormal, "Foo", "foo")
+	//
+	// time.Sleep(1 * time.Second)
+	// os.Exit(0)
+
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartLogging(glog.Infof)
+	eventBroadcaster.StartRecordingToSink(
+		&typedcorev1.EventSinkImpl{
+			Interface: client.CoreV1().Events("")})
+	recorder := eventBroadcaster.NewRecorder(
+		scheme.Scheme,
+		v1.EventSource{Component: "controlplane"})
+
 	chaoskube := chaoskube.New(
 		client,
 		labelSelector,
@@ -165,6 +192,7 @@ func main() {
 		log.StandardLogger(),
 		dryRun,
 		createEvent,
+		recorder,
 	)
 
 	if metricsAddress != "" {
